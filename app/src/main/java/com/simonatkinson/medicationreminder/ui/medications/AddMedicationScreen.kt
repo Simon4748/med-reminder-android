@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
@@ -42,42 +45,50 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 
 private val DoseUnits = listOf("mg", "mcg", "mL", "units", "tablet(s)")
-
-private enum class Frequency {
-    ONCE_DAILY,
-    TWICE_DAILY,
-    CUSTOM
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddMedicationScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    modeTitle: String = "Add medication",
+    initial: MedicationFormUi = MedicationFormUi(),
+    onSave: (MedicationFormUi) -> Unit = {}
 ) {
-    // UI-only local state for now
-    var name by remember { mutableStateOf("") }
-    var doseAmount by remember { mutableStateOf("") }
-    var notes by remember { mutableStateOf("") }
+    // Initialize state from "initial" (supports Edit mode)
+    var name by remember(initial) { mutableStateOf(initial.name) }
+    var doseAmount by remember(initial) { mutableStateOf(initial.doseAmount) }
+    var notes by remember(initial) { mutableStateOf(initial.notes) }
 
     var unitExpanded by remember { mutableStateOf(false) }
-    var doseUnit by remember { mutableStateOf(DoseUnits.first()) }
+    var doseUnit by remember(initial) {
+        mutableStateOf(
+            if (DoseUnits.contains(initial.doseUnit)) initial.doseUnit else DoseUnits.first()
+        )
+    }
 
     // Repeat pattern (Daily vs Specific days)
-    var repeatEveryDay by remember { mutableStateOf(true) }
-    val days = listOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
-    var selectedDays by remember { mutableStateOf(setOf<String>()) }
+    var repeatEveryDay by remember(initial) { mutableStateOf(initial.repeatEveryDay) }
+    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    var selectedDays by remember(initial) { mutableStateOf(initial.selectedDays) }
 
     // Frequency (once/twice/custom)
-    var frequency by remember { mutableStateOf(Frequency.ONCE_DAILY) }
+    var frequency by remember(initial) { mutableStateOf(initial.frequency) }
 
     // Times (strings for UI phase)
-    var times by remember { mutableStateOf(listOf("8:00 AM")) }
+    fun defaultTimesFor(freq: FrequencyUi): List<String> = when (freq) {
+        FrequencyUi.ONCE_DAILY -> listOf("8:00 AM")
+        FrequencyUi.TWICE_DAILY -> listOf("8:00 AM", "8:00 PM")
+        FrequencyUi.CUSTOM -> listOf("8:00 AM")
+    }
+
+    var times by remember(initial) {
+        mutableStateOf(
+            if (initial.times.isNotEmpty()) initial.times else defaultTimesFor(initial.frequency)
+        )
+    }
 
     // Time input dialog state (text mode)
     var showTimeDialog by remember { mutableStateOf(false) }
@@ -118,13 +129,9 @@ fun AddMedicationScreen(
         }
     }
 
-    fun applyFrequencyDefaults(newFrequency: Frequency) {
+    fun applyFrequencyDefaults(newFrequency: FrequencyUi) {
         frequency = newFrequency
-        times = when (newFrequency) {
-            Frequency.ONCE_DAILY -> listOf("8:00 AM")
-            Frequency.TWICE_DAILY -> listOf("8:00 AM", "8:00 PM")
-            Frequency.CUSTOM -> listOf("8:00 AM")
-        }
+        times = defaultTimesFor(newFrequency)
     }
 
     fun openTimeDialogForEdit(index: Int) {
@@ -144,7 +151,7 @@ fun AddMedicationScreen(
         showTimeDialog = true
     }
 
-    // Validation
+    // Validation (UI-only)
     val scheduleValid = repeatEveryDay || selectedDays.isNotEmpty()
     val timesValid = times.isNotEmpty()
     val canSave = name.isNotBlank() && doseAmount.isNotBlank() && scheduleValid && timesValid
@@ -161,14 +168,13 @@ fun AddMedicationScreen(
             AlertDialog(
                 onDismissRequest = { showTimeDialog = false },
                 title = { Text("Select time") },
-                text = {
-                    TimeInput(state = timeState)
-                },
+                text = { TimeInput(state = timeState) },
                 confirmButton = {
                     TextButton(
                         onClick = {
                             val picked = formatTime(timeState.hour, timeState.minute)
                             val idx = editingIndex
+
                             if (idx != null) {
                                 // Replace in place
                                 times = times.toMutableList().also { it[idx] = picked }
@@ -178,6 +184,7 @@ fun AddMedicationScreen(
                                     times = times + picked
                                 }
                             }
+
                             showTimeDialog = false
                         }
                     ) { Text("OK") }
@@ -189,7 +196,7 @@ fun AddMedicationScreen(
         }
     }
 
-    // Scan disclaimer dialog:
+    // Scan disclaimer dialog
     if (showScanDisclaimer) {
         AlertDialog(
             onDismissRequest = { showScanDisclaimer = false },
@@ -219,7 +226,7 @@ fun AddMedicationScreen(
         verticalArrangement = Arrangement.Top
     ) {
         Text(
-            text = "Add medication",
+            text = modeTitle,
             style = MaterialTheme.typography.headlineSmall
         )
 
@@ -316,30 +323,27 @@ fun AddMedicationScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = "Frequency",
-            style = MaterialTheme.typography.bodyMedium
-        )
+        Text(text = "Frequency", style = MaterialTheme.typography.bodyMedium)
 
         Column(modifier = Modifier.padding(top = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(
-                    selected = frequency == Frequency.ONCE_DAILY,
-                    onClick = { applyFrequencyDefaults(Frequency.ONCE_DAILY) }
+                    selected = frequency == FrequencyUi.ONCE_DAILY,
+                    onClick = { applyFrequencyDefaults(FrequencyUi.ONCE_DAILY) }
                 )
                 Text("Once daily")
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(
-                    selected = frequency == Frequency.TWICE_DAILY,
-                    onClick = { applyFrequencyDefaults(Frequency.TWICE_DAILY) }
+                    selected = frequency == FrequencyUi.TWICE_DAILY,
+                    onClick = { applyFrequencyDefaults(FrequencyUi.TWICE_DAILY) }
                 )
                 Text("Twice daily")
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(
-                    selected = frequency == Frequency.CUSTOM,
-                    onClick = { applyFrequencyDefaults(Frequency.CUSTOM) }
+                    selected = frequency == FrequencyUi.CUSTOM,
+                    onClick = { applyFrequencyDefaults(FrequencyUi.CUSTOM) }
                 )
                 Text("Custom times")
             }
@@ -347,10 +351,7 @@ fun AddMedicationScreen(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        Text(
-            text = "Repeat",
-            style = MaterialTheme.typography.bodyMedium
-        )
+        Text(text = "Repeat", style = MaterialTheme.typography.bodyMedium)
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -432,11 +433,7 @@ fun AddMedicationScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text(
-            text = "Times",
-            style = MaterialTheme.typography.bodyMedium
-        )
-
+        Text(text = "Times", style = MaterialTheme.typography.bodyMedium)
         Spacer(modifier = Modifier.height(8.dp))
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -456,14 +453,8 @@ fun AddMedicationScreen(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = time,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(
-                                text = "  (tap to edit)",
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            Text(text = time, style = MaterialTheme.typography.bodyLarge)
+                            Text(text = "  (tap to edit)", style = MaterialTheme.typography.bodySmall)
                         }
                     }
 
@@ -486,12 +477,12 @@ fun AddMedicationScreen(
             OutlinedButton(
                 onClick = { openTimeDialogForAdd() },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = frequency == Frequency.CUSTOM
+                enabled = frequency == FrequencyUi.CUSTOM
             ) {
                 Text("Add time")
             }
 
-            if (frequency != Frequency.CUSTOM) {
+            if (frequency != FrequencyUi.CUSTOM) {
                 Text(
                     text = "Switch to Custom times to add more.",
                     style = MaterialTheme.typography.bodySmall,
@@ -507,13 +498,22 @@ fun AddMedicationScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            TextButton(onClick = onBack) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onBack) { Text("Cancel") }
 
             Button(
                 onClick = {
-                    // Placeholder: save later
+                    val form = MedicationFormUi(
+                        name = name.trim(),
+                        doseAmount = doseAmount.trim(),
+                        doseUnit = doseUnit,
+                        notes = notes.trim(),
+                        frequency = frequency,
+                        repeatEveryDay = repeatEveryDay,
+                        selectedDays = selectedDays,
+                        times = times
+                    )
+                    onSave(form)
+                    onBack()
                 },
                 enabled = canSave
             ) {
