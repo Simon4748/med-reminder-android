@@ -6,6 +6,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.simonatkinson.medicationreminder.ui.medications.AddMedicationScreen
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListScreen
+import com.simonatkinson.medicationreminder.ui.medications.MedicationListDemoData
 
 private object Routes {
     const val MEDICATION_LIST = "medication_list"
@@ -22,7 +23,11 @@ fun AppNav() {
     ) {
         composable(Routes.MEDICATION_LIST) {
             MedicationListScreen(
-                onAddMedication = { navController.navigate(Routes.ADD_MEDICATION) }
+                items = MedicationListDemoData.items,
+                onAddMedication = { navController.navigate(Routes.ADD_MEDICATION) },
+                onMedicationClick = {
+                    // TODO later: navigate to details/edit screen
+                }
             )
         }
         composable(Routes.ADD_MEDICATION) {
