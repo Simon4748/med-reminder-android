@@ -15,6 +15,9 @@ import com.simonatkinson.medicationreminder.ui.medications.MedicationFormUi
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListDemoData
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListItemUi
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListScreen
+import java.time.LocalDateTime
+import com.simonatkinson.medicationreminder.ui.medications.NextDoseCalculator
+
 
 private object Routes {
     const val MEDICATION_LIST = "medication_list"
@@ -26,13 +29,12 @@ private object Routes {
 fun AppNav() {
     val navController = rememberNavController()
 
-    // Single source of truth (UI-only for now)
     var medications by remember { mutableStateOf(MedicationListDemoData.items) }
 
     // Selection + draft for edit
     var selectedId by remember { mutableStateOf<String?>(null) }
     var formDraft by remember { mutableStateOf<MedicationFormUi?>(null) }
-    var editingId by remember { mutableStateOf<String?>(null) } // null = Add, non-null = Edit
+    var editingId by remember { mutableStateOf<String?>(null) }
 
     fun selectedItem(): MedicationListItemUi? =
         selectedId?.let { id -> medications.firstOrNull { it.id == id } }
@@ -43,7 +45,21 @@ fun AppNav() {
     ) {
         composable(Routes.MEDICATION_LIST) {
             MedicationListScreen(
-                items = medications,
+                items = medications.map { med ->
+                    med.copy(
+                        nextDose = NextDoseCalculator.nextDoseLabel(
+                            now = LocalDateTime.now(),
+                            times = med.timesSummary.split(",").map { it.trim() }.filter { it.isNotBlank() },
+                            repeatEveryDay = med.daysSummary.equals("Every day", ignoreCase = true),
+                            selectedDays = if (med.daysSummary.equals("Every day", ignoreCase = true)) {
+                                emptySet()
+                            } else {
+                                med.daysSummary.split(",").map { it.trim() }.toSet()
+                            }
+                        )
+                    )
+                },
+
                 onAddMedication = {
                     // Add mode
                     formDraft = null
@@ -60,14 +76,14 @@ fun AppNav() {
         composable(Routes.MEDICATION_DETAILS) {
             val item = selectedItem()
             if (item == null) {
-                // Fallback: if selection disappeared, return to list
+                // Fallback if selection disappeared, return to list
                 navController.popBackStack()
             } else {
                 MedicationDetailsScreen(
                     item = item,
                     onBack = { navController.popBackStack() },
                     onEdit = {
-                        // Edit mode: create a draft from the selected item
+                        // Edit mode
                         editingId = item.id
                         formDraft = item.toFormDraft()
                         navController.navigate(Routes.ADD_MEDICATION)
@@ -99,7 +115,6 @@ fun AppNav() {
                     // Keep selection consistent
                     selectedId = id
 
-                    // Clear edit state after save (so next time is clean)
                     formDraft = null
                     editingId = null
                 }
@@ -128,7 +143,7 @@ private fun MedicationListItemUi.toFormDraft(): MedicationFormUi {
 
     val everyDay = daysSummary.equals("Every day", ignoreCase = true)
 
-    // For demo data, parse only when it’s "Mon, Wed, Fri" style
+    // For demo data
     val validDays = setOf("Mon","Tue","Wed","Thu","Fri","Sat","Sun")
     val daySet = if (everyDay) emptySet() else {
         daysSummary.split(",")
