@@ -17,6 +17,9 @@ import com.simonatkinson.medicationreminder.ui.medications.MedicationListItemUi
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListScreen
 import java.time.LocalDateTime
 import com.simonatkinson.medicationreminder.ui.medications.NextDoseCalculator
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
+
 
 
 private object Routes {
@@ -36,6 +39,16 @@ fun AppNav() {
     var formDraft by remember { mutableStateOf<MedicationFormUi?>(null) }
     var editingId by remember { mutableStateOf<String?>(null) }
 
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = LocalDateTime.now()
+            delay(30_000) // update twice a minute
+        }
+    }
+
+
     fun selectedItem(): MedicationListItemUi? =
         selectedId?.let { id -> medications.firstOrNull { it.id == id } }
 
@@ -48,7 +61,7 @@ fun AppNav() {
                 items = medications.map { med ->
                     med.copy(
                         nextDose = NextDoseCalculator.nextDoseLabel(
-                            now = LocalDateTime.now(),
+                            now = now,
                             times = med.timesSummary.split(",").map { it.trim() }.filter { it.isNotBlank() },
                             repeatEveryDay = med.daysSummary.equals("Every day", ignoreCase = true),
                             selectedDays = if (med.daysSummary.equals("Every day", ignoreCase = true)) {
