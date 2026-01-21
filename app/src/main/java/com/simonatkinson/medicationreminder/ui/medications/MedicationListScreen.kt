@@ -20,6 +20,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import com.simonatkinson.medicationreminder.ui.notifications.ReminderNotifier
+import androidx.compose.material3.OutlinedButton
+
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import com.simonatkinson.medicationreminder.ui.notifications.AlarmScheduler
+import com.simonatkinson.medicationreminder.ui.notifications.ExactAlarmPermission
+
+
+
+
+
 @Composable
 fun MedicationListScreen(
     items: List<MedicationListItemUi>,
@@ -51,6 +71,55 @@ fun MedicationListScreen(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        val context = LocalContext.current
+
+        val requestPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            if (isGranted) ReminderNotifier.showTestNotification(context)
+        }
+
+
+        OutlinedButton(
+            onClick = {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val granted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED
+
+                    if (granted) {
+                        ReminderNotifier.showTestNotification(context)
+                    } else {
+                        requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                } else {
+                    ReminderNotifier.showTestNotification(context)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Test reminder notification")
+        }
+
+        OutlinedButton(
+            onClick = {
+                val ctx = context
+                if (!AlarmScheduler.canScheduleExactAlarms(ctx)) {
+                    val intent: Intent? = ExactAlarmPermission.requestExactAlarmPermissionIntent(ctx)
+                    if (intent != null) ctx.startActivity(intent)
+                } else {
+                    AlarmScheduler.scheduleExactOneMinuteTest(ctx)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Schedule exact reminder in 1 minute")
+        }
+
+
+
 
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp),

@@ -14,11 +14,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import com.simonatkinson.medicationreminder.ui.theme.MedicationReminderTheme
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListScreen
 import com.simonatkinson.medicationreminder.ui.navigation.AppNav
-
+import com.simonatkinson.medicationreminder.ui.notifications.NotificationChannels
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        NotificationChannels.ensureCreated(this)
         setContent {
             MedicationReminderTheme {
                 MedicationReminderTheme {
