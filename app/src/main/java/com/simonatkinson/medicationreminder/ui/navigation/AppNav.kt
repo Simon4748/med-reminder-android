@@ -41,6 +41,9 @@ fun AppNav() {
 
     var now by remember { mutableStateOf(LocalDateTime.now()) }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+
     LaunchedEffect(Unit) {
         while (true) {
             now = LocalDateTime.now()
@@ -130,6 +133,55 @@ fun AppNav() {
 
                     formDraft = null
                     editingId = null
+
+                    //cancel previous alarms if editing
+                    if (isEdit) {
+                        val old = medications.firstOrNull { it.id == id }
+                        val oldTimes = old?.timesSummary
+                            ?.split(",")
+                            ?.map { it.trim() }
+                            ?.filter { it.isNotBlank() }
+                            .orEmpty()
+
+                        oldTimes.forEach { slot ->
+                            com.simonatkinson.medicationreminder.ui.notifications.AlarmScheduler.cancelTimeSlot(
+                                context = context,
+                                medId = id,
+                                timeSlot = slot
+                            )
+                        }
+                    }
+
+                    // schedule the new alarms
+                    val now = java.time.LocalDateTime.now()
+                    val doseText = "${saved.doseAmount} ${saved.doseUnit}".trim()
+                    val timesToSchedule = saved.times.map { it.trim() }.filter { it.isNotBlank() }
+
+                    timesToSchedule.forEach { slot ->
+                        val next = com.simonatkinson.medicationreminder.ui.medications.NextDoseCalculator.nextOccurrenceForTimeSlot(
+                            now = now,
+                            timeText = slot,
+                            repeatEveryDay = saved.repeatEveryDay,
+                            selectedDays = saved.selectedDays
+                        ) ?: return@forEach
+
+                        // If exact alarms are not allowed
+                        if (!com.simonatkinson.medicationreminder.ui.notifications.AlarmScheduler.canScheduleExactAlarms(context)) {
+                            return@forEach
+                        }
+
+                        com.simonatkinson.medicationreminder.ui.notifications.AlarmScheduler.scheduleExactTimeSlot(
+                            context = context,
+                            medId = id,
+                            medName = saved.name,
+                            doseText = doseText,
+                            timeSlot = slot,
+                            repeatEveryDay = saved.repeatEveryDay,
+                            selectedDays = saved.selectedDays,
+                            triggerAtMillis = next.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                        )
+                    }
+
                 }
             )
         }

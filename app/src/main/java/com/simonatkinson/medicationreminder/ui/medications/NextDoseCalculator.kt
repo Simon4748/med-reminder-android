@@ -83,4 +83,33 @@ object NextDoseCalculator {
                 .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         }
     }
+
+    fun nextOccurrenceForTimeSlot(
+        now: LocalDateTime,
+        timeText: String,
+        repeatEveryDay: Boolean,
+        selectedDays: Set<String>
+    ): LocalDateTime? {
+        val slotTime = parseTime(timeText) ?: return null
+
+        val allowedDays = if (repeatEveryDay) null else selectedDaysToDayOfWeek(selectedDays)
+        if (!repeatEveryDay && allowedDays.isNullOrEmpty()) return null
+
+        // Search up to 8 days ahead
+        for (dayOffset in 0..8) {
+            val date = now.toLocalDate().plusDays(dayOffset.toLong())
+            val dow = date.dayOfWeek
+
+            if (allowedDays != null && dow !in allowedDays) continue
+
+            val candidateDateTime = date.atTime(slotTime)
+
+            // If today, require candidate to be strictly in the future
+            if (dayOffset == 0 && !candidateDateTime.isAfter(now)) continue
+
+            return candidateDateTime
+        }
+        return null
+    }
+
 }
