@@ -2,22 +2,25 @@ package com.simonatkinson.medicationreminder.ui.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.simonatkinson.medicationreminder.data.repository.MedicationRepositoryImpl
 import com.simonatkinson.medicationreminder.ui.medications.AddMedicationScreen
 import com.simonatkinson.medicationreminder.ui.medications.FrequencyUi
 import com.simonatkinson.medicationreminder.ui.medications.MedicationDetailsScreen
 import com.simonatkinson.medicationreminder.ui.medications.MedicationFormUi
-import com.simonatkinson.medicationreminder.ui.medications.MedicationListDemoData
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListItemUi
 import com.simonatkinson.medicationreminder.ui.medications.MedicationListScreen
 import com.simonatkinson.medicationreminder.ui.medications.NextDoseCalculator
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDateTime
 
 private object Routes {
@@ -30,32 +33,72 @@ private object Routes {
 fun AppNav() {
     val navController = rememberNavController()
 
-    // Single source of truth
-    var medications by remember { mutableStateOf(MedicationListDemoData.items) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repo = remember { MedicationRepositoryImpl(context) }
+    val scope = rememberCoroutineScope()
+
+    // DB source of truth
+    val dbItems by repo.observeAll().collectAsState(initial = emptyList())
 
     // Selection + draft for edit
     var selectedId by remember { mutableStateOf<String?>(null) }
     var formDraft by remember { mutableStateOf<MedicationFormUi?>(null) }
     var editingId by remember { mutableStateOf<String?>(null) } // null = Add, non-null = Edit
 
-    // Clock tick for next dose
-    var now by remember { mutableStateOf(LocalDateTime.now()) }
-
-    // Context used for scheduling alarms
-    val context = androidx.compose.ui.platform.LocalContext.current
-
+    // Exact-alarm prompt
     var showExactAlarmDialog by remember { mutableStateOf(false) }
 
-
+    // Clock tick for next-dose labels
+    var now by remember { mutableStateOf(LocalDateTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
             now = LocalDateTime.now()
-            delay(30_000) // update twice a minute
+            delay(30_000)
         }
     }
 
+    // Map DB rows -> UI list items
+    val uiMeds: List<MedicationListItemUi> = dbItems.map { row ->
+        val med = row.medication
+        val sched = row.schedule
+
+        val daysSummary = if (sched.repeatEveryDay) {
+            "Every day"
+        } else {
+            sched.selectedDaysCsv
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .joinToString(", ")
+                .ifBlank { "Specific days" }
+        }
+
+        val timesSummary = sched.timesCsv
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .joinToString(", ")
+
+        val timeCount = timesSummary.split(",").map { it.trim() }.filter { it.isNotBlank() }.size
+        val scheduleSummary = when (timeCount) {
+            1 -> "Once daily"
+            2 -> "Twice daily"
+            else -> "Custom times"
+        }
+
+        MedicationListItemUi(
+            id = med.id,
+            name = med.name,
+            dose = "${med.doseAmount} ${med.doseUnit}".trim(),
+            scheduleSummary = scheduleSummary,
+            daysSummary = daysSummary,
+            timesSummary = timesSummary,
+            nextDose = null
+        )
+    }
+
     fun selectedItem(): MedicationListItemUi? =
-        selectedId?.let { id -> medications.firstOrNull { it.id == id } }
+        selectedId?.let { id -> uiMeds.firstOrNull { it.id == id } }
 
     if (showExactAlarmDialog) {
         androidx.compose.material3.AlertDialog(
@@ -84,13 +127,12 @@ fun AppNav() {
         )
     }
 
-
     NavHost(
         navController = navController,
         startDestination = Routes.MEDICATION_LIST
     ) {
         composable(Routes.MEDICATION_LIST) {
-            val computed = medications.map { med ->
+            val computed = uiMeds.map { med ->
                 med.copy(
                     nextDose = NextDoseCalculator.nextDoseLabel(
                         now = now,
@@ -111,7 +153,6 @@ fun AppNav() {
             MedicationListScreen(
                 items = computed,
                 onAddMedication = {
-                    // Add mode
                     formDraft = null
                     editingId = null
                     navController.navigate(Routes.ADD_MEDICATION)
@@ -150,49 +191,26 @@ fun AppNav() {
                 onSave = { saved ->
                     val id = editingId ?: generateId(saved.name)
 
-                    // Capture old times before update medications
-                    val oldTimes: List<String> = if (isEdit) {
-                        medications.firstOrNull { it.id == id }
-                            ?.timesSummary
-                            ?.split(",")
-                            ?.map { it.trim() }
-                            ?.filter { it.isNotBlank() }
-                            .orEmpty()
-                    } else {
-                        emptyList()
+                    // Persist to Room
+                    val selectedDaysCsv = saved.selectedDays.joinToString(",")
+                    val timesCsv = saved.times.joinToString(",")
+
+                    scope.launch {
+                        repo.upsertMedicationWithSchedule(
+                            id = id,
+                            name = saved.name,
+                            doseAmount = saved.doseAmount,
+                            doseUnit = saved.doseUnit,
+                            notes = saved.notes,
+                            repeatEveryDay = saved.repeatEveryDay,
+                            selectedDaysCsv = selectedDaysCsv,
+                            timesCsv = timesCsv
+                        )
                     }
 
-                    val updatedItem = saved.toListItemUi(
-                        id = id,
-                        nextDose = if (isEdit) selectedItem()?.nextDose else null
-                    )
-
-                    // Update in-memory list
-                    medications = if (isEdit) {
-                        medications.map { if (it.id == id) updatedItem else it }
-                    } else {
-                        medications + updatedItem
-                    }
-
-                    // Keep selection consistent
-                    selectedId = id
-
-                    // ---- Notifications / alarms ---
-
-                    // Cancel old alarms for that medication/time slots
-                    if (isEdit) {
-                        oldTimes.forEach { slot ->
-                            com.simonatkinson.medicationreminder.ui.notifications.AlarmScheduler.cancelTimeSlot(
-                                context = context,
-                                medId = id,
-                                timeSlot = slot
-                            )
-                        }
-                    }
-
-                    // Schedule new alarms
+                    // Schedule alarms
                     if (com.simonatkinson.medicationreminder.ui.notifications.AlarmScheduler.canScheduleExactAlarms(context)) {
-                        val nowTs = java.time.LocalDateTime.now()
+                        val nowTs = LocalDateTime.now()
                         val doseText = "${saved.doseAmount} ${saved.doseUnit}".trim()
 
                         saved.times.map { it.trim() }
@@ -222,16 +240,17 @@ fun AppNav() {
                         showExactAlarmDialog = true
                     }
 
-                    // Clear edit state last
+                    selectedId = id
                     formDraft = null
                     editingId = null
+                    navController.popBackStack()
                 }
             )
         }
     }
 }
 
-/** UI-only mapping: list item -> form draft (for prefilling Edit) */
+/** UI-only mapping */
 private fun MedicationListItemUi.toFormDraft(): MedicationFormUi {
     val doseParts = dose.trim().split(" ", limit = 2)
     val amount = doseParts.getOrNull(0).orEmpty()
@@ -268,37 +287,6 @@ private fun MedicationListItemUi.toFormDraft(): MedicationFormUi {
         repeatEveryDay = everyDay,
         selectedDays = daySet,
         times = timesList
-    )
-}
-
-/** UI-only mapping: form state -> list row */
-private fun MedicationFormUi.toListItemUi(
-    id: String,
-    nextDose: String? = null
-): MedicationListItemUi {
-    val schedule = when (frequency) {
-        FrequencyUi.ONCE_DAILY -> "Once daily"
-        FrequencyUi.TWICE_DAILY -> "Twice daily"
-        FrequencyUi.CUSTOM -> "Custom times"
-    }
-
-    val days = if (repeatEveryDay) {
-        "Every day"
-    } else {
-        val order = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-        order.filter { selectedDays.contains(it) }.joinToString(", ").ifBlank { "Specific days" }
-    }
-
-    val timesText = times.joinToString(", ")
-
-    return MedicationListItemUi(
-        id = id,
-        name = name,
-        dose = "${doseAmount.trim()} ${doseUnit.trim()}".trim(),
-        scheduleSummary = schedule,
-        daysSummary = days,
-        timesSummary = timesText,
-        nextDose = nextDose
     )
 }
 
